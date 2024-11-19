@@ -23,13 +23,11 @@ router.get('/:id', async (req, res, next) => {
     }
 
     try {
-        // Check cache first
         const cachedData = cache.get(id);
         if (cachedData) {
             return res.send(cachedData);
         }
 
-        // Check if product exists in the database
         let product = await Product.findOne({ code: id });
 
         if (!product) {
