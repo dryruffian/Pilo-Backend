@@ -33,11 +33,12 @@ connectWithRetry();
 
 // Routes
 app.use('/health', healthRouter);
-app.use('/api/v1/barcode',protect, barcodeRouter);
+app.use('/api/v1/barcode',protect,extendTokenExpiration, barcodeRouter);
 app.use('/auth',signupRouter);
 app.use('/auth',login);
 app.use('/auth',me)
-app.use('/data',protect,listRouter)
+app.use('/data',protect,extendTokenExpiration,listRouter)
+app.use('/data/history', protect, historyRouter);
 
 // Error handling
 app.use(notFoundHandler);
