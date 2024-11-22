@@ -219,10 +219,28 @@ class ProductAnalyzer {
             protein: nutriments.proteins_100g,
         };
     }
+
+    getFoodScore(){
+        const nutriScoreToNumber  = (score) => {
+            if (!score) return 0;
+            const upperScore = score.toUpperCase();
+            if (upperScore < 'A' || upperScore > `E`) return 0
+            return upperScore.charCodeAt(0) - `A`.charCodeAt(0) + 1;
+        }
+
+        const nutriScoreValue = nutriScoreToNumber(this.nutriscore)
+        if(nutriScoreValue === 0 ){
+            return parseInt(this.novascore)
+        }
+        return ((6 - nutriScoreValue) + (5 - parseInt(this.novascore)))
+        
+
+    }
 }
 const q = new ProductAnalyzer(data);
 console.log(q.getAllergens());
 console.log(q.getNutrition());
 console.log(q.getNutritionAdvisory());
 console.log(q.analyze());
+console.log(q.getFoodScore())
 export default ProductAnalyzer;

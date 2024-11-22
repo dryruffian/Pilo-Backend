@@ -11,6 +11,7 @@ import healthRouter from './routes/health.js';
 import signupRouter from './routes/signup.js';
 import login from './routes/login.js';
 import listRouter from './routes/list.js'
+import me from './routes/me.js'
 import {protect,extendTokenExpiration} from "./middleware/protect.js";
 
 // Load environment configuration
@@ -35,6 +36,7 @@ app.use('/health', healthRouter);
 app.use('/api/v1/barcode',protect, barcodeRouter);
 app.use('/auth',signupRouter);
 app.use('/auth',login);
+app.use('/auth',me)
 app.use('/data',protect,listRouter)
 
 // Error handling

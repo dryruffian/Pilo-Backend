@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { number } from 'zod';
 const Schema = mongoose.Schema;
 
 const ProductSchema = new Schema({
@@ -116,6 +117,10 @@ const ProductSchema = new Schema({
             type: Schema.Types.Mixed,  // Can be boolean or string ('unknown')
             default: 'unknown'
         }
+    },
+    foodscore:{
+        type: Number,
+        default:0
     }
 }, {
     timestamps: true,

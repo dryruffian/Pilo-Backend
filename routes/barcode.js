@@ -58,6 +58,7 @@ router.get('/:id', async (req, res, next) => {
                 nutrition_values: productData.getNutrition(),
                 food_restriction: productData.analyze(),
                 by_user: req.user._id,
+                food_score:req.getFoodScore()
             });
 
             // Save to database
