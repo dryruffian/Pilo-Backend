@@ -13,6 +13,7 @@ import login from './routes/login.js';
 import listRouter from './routes/list.js'
 import me from './routes/me.js'
 import {protect,extendTokenExpiration} from "./middleware/protect.js";
+import historyRouter from "./routes/history.js"
 
 // Load environment configuration
 loadEnvConfig();
