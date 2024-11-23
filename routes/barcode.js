@@ -1,3 +1,4 @@
+// barcode.js
 import express from 'express';
 import axios from 'axios';
 import NodeCache from 'node-cache';
@@ -40,6 +41,13 @@ router.get('/:id', async (req, res, next) => {
 
             const productData = new ProductAnalyzer(response.data);
 
+            // Calculate food score before creating the product
+            const foodScore = productData.getFoodScore();
+            
+            console.log('Nutriscore Grade:', productData.nutriscore);
+            console.log('Nova Group:', productData.novascore);
+            console.log('Calculated Food Score:', foodScore);
+
             // Create new product instance using Mongoose model
             product = new Product({
                 code: productData.code,
@@ -58,7 +66,14 @@ router.get('/:id', async (req, res, next) => {
                 nutrition_values: productData.getNutrition(),
                 food_restriction: productData.analyze(),
                 by_user: req.user._id,
-                food_score:productData.getFoodScore()
+                food_score: foodScore // Use the calculated score
+            });
+
+            // Log the product data before saving
+            console.log('Product to be saved:', {
+                nutriscore_grade: product.nutriscore_grade,
+                nova_group: product.nova_group,
+                food_score: product.food_score
             });
 
             // Save to database
@@ -83,20 +98,34 @@ router.get('/:id', async (req, res, next) => {
         return res.json(productObject);
 
     } catch (err) {
+        console.error('Full error details:', err);
+        
         if (err.response) {
             // Handle API response errors
-            return res.status(err.response.status).send({ error: err.response.data });
+            console.error('API Response Error:', err.response.data);
+            return res.status(err.response.status).send({ 
+                error: err.response.data,
+                message: 'Error from external API'
+            });
         } else if (err.request) {
             // Handle no response from API server
-            return res.status(503).send({ error: 'No response from API server' });
+            return res.status(503).send({ 
+                error: 'No response from API server',
+                message: 'External API is unavailable'
+            });
         } else if (err instanceof mongoose.Error) {
             // Better MongoDB error handling
             console.error('Database error:', err);
-            return res.status(500).send({ error: 'Database error' });
+            return res.status(500).send({ 
+                error: 'Database error',
+                message: err.message
+            });
         } else {
             console.error('Unexpected error:', err);
-            // Pass other errors to error handling middleware
-            next(err);
+            return res.status(500).send({ 
+                error: 'Unexpected error',
+                message: err.message
+            });
         }
     }
 });

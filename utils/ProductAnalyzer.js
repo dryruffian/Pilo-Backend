@@ -220,21 +220,36 @@ class ProductAnalyzer {
         };
     }
 
-    getFoodScore(){
-        const nutriScoreToNumber  = (score) => {
+    getFoodScore() {
+        const nutriScoreToNumber = (score) => {
             if (!score) return 0;
-            const upperScore = score.toUpperCase();
-            if (upperScore < 'A' || upperScore > `E`) return 0
-            return upperScore.charCodeAt(0) - `A`.charCodeAt(0) + 1;
+            const upperScore = score.toString().toUpperCase();
+            if (!['A', 'B', 'C', 'D', 'E'].includes(upperScore)) return 0;
+            return upperScore.charCodeAt(0) - 'A'.charCodeAt(0) + 1;
+        };
+
+        const nutriScoreValue = nutriScoreToNumber(this.nutriscore);
+        const novaScore = parseInt(this.novascore) || 0;
+
+        if (nutriScoreValue === 0 && novaScore === 0) {
+            return Number(5.0);
         }
 
-        const nutriScoreValue = nutriScoreToNumber(this.nutriscore)
-        if(nutriScoreValue === 0 ){
-            return parseInt(this.novascore)
+        if (nutriScoreValue === 0) {
+            const score = Math.max(10 - (novaScore * 2), 0);
+            return Number(score.toFixed(1));
         }
-        return ((6 - nutriScoreValue) + (5 - parseInt(this.novascore)))
+
+        if (novaScore === 0) {
+            const score = Math.max(10 - (nutriScoreValue * 2), 0);
+            return Number(score.toFixed(1));
+        }
+
+        const combinedScore = ((6 - nutriScoreValue) + (5 - novaScore)) * 10 / 9;
+        const finalScore = Math.min(Math.max(combinedScore, 0), 10);
         
-
+        // Ensure we return a number with one decimal place
+        return Number(finalScore.toFixed(1));
     }
 }
 const q = new ProductAnalyzer(data);

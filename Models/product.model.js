@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+import mongoose, { Types } from 'mongoose';
 import { number } from 'zod';
 const Schema = mongoose.Schema;
 
@@ -118,9 +118,12 @@ const ProductSchema = new Schema({
             default: 'unknown'
         }
     },
-    foodscore:{
+    food_score: {
         type: Number,
-        default:0
+        default: 0,
+        min: 0,
+        max: 10,
+        get: v => Math.round(v * 10) / 10
     }
 }, {
     timestamps: true,
