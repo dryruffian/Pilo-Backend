@@ -20,7 +20,7 @@ loadEnvConfig();
 
 // Initialize express
 const app = express();
-
+app.set('trust proxy', 1);
 // Setup security middleware
 setupSecurityMiddleware(app);
 
