@@ -6,7 +6,7 @@ import rateLimit from 'express-rate-limit';
 const setupSecurityMiddleware = (app) => {
     app.use(helmet());
     app.use(cors({
-        origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
+        origin: process.env.ALLOWED_ORIGINS?.split(',') : '*',
         methods: ['GET', 'POST', 'PUT', 'DELETE'],
         allowedHeaders: ['Content-Type', 'Authorization'],
         credentials: true
