@@ -3,6 +3,9 @@
 
 echo "Starting backend deployment..."
 
+# Define correct paths
+BACKEND_DIR="/home/ubuntu/Pilo-Backend"  # Updated correct path
+
 # Install required packages if not present
 if ! command -v nginx &> /dev/null; then
     echo "Installing nginx..."
@@ -45,8 +48,11 @@ http {
 
     # Main Server Block
     server {
-        listen 80;
-        server_name _;  # Catch all requests
+        listen 80 default_server;
+        listen [::]:80 default_server;
+        
+        # Root directory for static files (if any)
+        root /var/www/html;
 
         # Proxy Settings
         location / {
@@ -88,7 +94,6 @@ http {
             proxy_pass http://localhost:3000/health;
             proxy_http_version 1.1;
             proxy_set_header Host $host;
-            proxy_cache_bypass $http_upgrade;
             
             # Specific timeouts for health check
             proxy_connect_timeout 10;
@@ -113,15 +118,30 @@ fi
 
 # Start backend with PM2
 echo "Starting backend server..."
-cd /home/ubuntu/pilo-backend  # Adjust this path to your backend directory
-pm2 delete all || true
-pm2 start index.js --name pilo-backend
+if [ -d "$BACKEND_DIR" ]; then
+    cd "$BACKEND_DIR"
+    # Check if node_modules exists, if not install dependencies
+    if [ ! -d "node_modules" ]; then
+        echo "Installing dependencies..."
+        npm install
+    fi
+    
+    # Start or restart the application
+    if pm2 list | grep -q "pilo-backend"; then
+        pm2 restart pilo-backend
+    else
+        pm2 start index.js --name pilo-backend
+    fi
+    
+    # Save PM2 configuration
+    pm2 save
 
-# Save PM2 configuration
-pm2 save
-
-# Setup PM2 startup script
-sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u ubuntu --hp /home/ubuntu
+    # Setup PM2 startup script
+    sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u ubuntu --hp /home/ubuntu
+else
+    echo "❌ Backend directory not found at $BACKEND_DIR"
+    exit 1
+fi
 
 # Final checks
 echo "Performing final checks..."
