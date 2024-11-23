@@ -3,13 +3,19 @@
 
 echo "Starting backend deployment..."
 
-# Define correct paths
-BACKEND_DIR="/home/ubuntu/Pilo-Backend"  # Updated correct path
+# Define paths
+BACKEND_DIR="/home/ubuntu/Pilo-Backend"
+DOMAIN="api.pilo.life"
 
-# Install required packages if not present
+# Install required packages
+if ! command -v certbot &> /dev/null; then
+    echo "Installing certbot..."
+    sudo apt update
+    sudo apt install -y certbot python3-certbot-nginx
+fi
+
 if ! command -v nginx &> /dev/null; then
     echo "Installing nginx..."
-    sudo apt update
     sudo apt install -y nginx
 fi
 
@@ -18,9 +24,13 @@ if ! command -v pm2 &> /dev/null; then
     sudo npm install -g pm2
 fi
 
+# Get SSL certificate
+echo "Setting up SSL certificate..."
+sudo certbot certonly --nginx -d $DOMAIN --non-interactive --agree-tos --email your-email@example.com
+
 # Create Nginx configuration
 echo "Creating Nginx configuration..."
-sudo tee /etc/nginx/nginx.conf > /dev/null << 'EOL'
+sudo tee /etc/nginx/nginx.conf > /dev/null << EOL
 user www-data;
 worker_processes auto;
 pid /run/nginx.pid;
@@ -42,31 +52,62 @@ http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
+    # SSL Settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    ssl_ciphers EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH;
+
     # Logging
     access_log /var/log/nginx/access.log;
     error_log /var/log/nginx/error.log;
 
-    # Main Server Block
+    # Gzip Settings
+    gzip on;
+    gzip_disable "msie6";
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+    # HTTP redirect to HTTPS
     server {
-        listen 80 default_server;
-        listen [::]:80 default_server;
-        
-        # Root directory for static files (if any)
-        root /var/www/html;
+        listen 80;
+        server_name $DOMAIN;
+        return 301 https://\$server_name\$request_uri;
+    }
+
+    # HTTPS server
+    server {
+        listen 443 ssl http2;
+        server_name $DOMAIN;
+
+        # SSL Configuration
+        ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+
+        # Security Headers
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer-when-downgrade" always;
+        add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'" always;
 
         # Proxy Settings
         location / {
             proxy_pass http://localhost:3000;
             proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection 'upgrade';
-            proxy_set_header Host $host;
-            proxy_cache_bypass $http_upgrade;
+            proxy_set_header Host \$host;
+            proxy_cache_bypass \$http_upgrade;
 
             # Additional proxy settings
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
 
             # Timeouts
             proxy_connect_timeout 60;
@@ -79,7 +120,7 @@ http {
             add_header 'Access-Control-Allow-Headers' 'Origin, X-Requested-With, Content-Type, Accept, Authorization' always;
 
             # Handle preflight requests
-            if ($request_method = 'OPTIONS') {
+            if (\$request_method = 'OPTIONS') {
                 add_header 'Access-Control-Allow-Origin' '*';
                 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE';
                 add_header 'Access-Control-Allow-Headers' 'Origin, X-Requested-With, Content-Type, Accept, Authorization';
@@ -93,7 +134,7 @@ http {
         location /health {
             proxy_pass http://localhost:3000/health;
             proxy_http_version 1.1;
-            proxy_set_header Host $host;
+            proxy_set_header Host \$host;
             
             # Specific timeouts for health check
             proxy_connect_timeout 10;
@@ -120,56 +161,50 @@ fi
 echo "Starting backend server..."
 if [ -d "$BACKEND_DIR" ]; then
     cd "$BACKEND_DIR"
-    # Check if node_modules exists, if not install dependencies
     if [ ! -d "node_modules" ]; then
         echo "Installing dependencies..."
         npm install
     fi
     
-    # Start or restart the application
     if pm2 list | grep -q "pilo-backend"; then
         pm2 restart pilo-backend
     else
         pm2 start index.js --name pilo-backend
     fi
     
-    # Save PM2 configuration
     pm2 save
-
-    # Setup PM2 startup script
     sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u ubuntu --hp /home/ubuntu
 else
     echo "❌ Backend directory not found at $BACKEND_DIR"
     exit 1
 fi
 
+# Set up SSL auto-renewal
+echo "Setting up SSL auto-renewal..."
+sudo tee /etc/cron.monthly/ssl-renewal << EOL
+#!/bin/bash
+certbot renew --quiet --pre-hook "systemctl stop nginx" --post-hook "systemctl start nginx"
+EOL
+sudo chmod +x /etc/cron.monthly/ssl-renewal
+
 # Final checks
 echo "Performing final checks..."
 
-# Check if Nginx is running
 if systemctl is-active --quiet nginx; then
     echo "✅ Nginx is running"
 else
     echo "❌ Nginx failed to start"
 fi
 
-# Check if PM2 process is running
 if pm2 pid pilo-backend > /dev/null; then
     echo "✅ Backend server is running"
 else
     echo "❌ Backend server failed to start"
 fi
 
-# Wait for services to fully start
-echo "Waiting for services to start..."
-sleep 5
-
-# Test the endpoints
-echo -e "\nTesting endpoints..."
-echo "Testing direct backend endpoint..."
-curl -I http://localhost:3000/health
-echo -e "\nTesting Nginx proxied endpoint..."
-curl -I http://localhost/health
+echo "Testing endpoints..."
+echo "Testing HTTPS endpoint..."
+curl -k https://$DOMAIN/health
 
 echo "Deployment complete!"
 echo "You can monitor logs with:"
