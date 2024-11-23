@@ -1,22 +1,37 @@
 #!/bin/bash
 # deploy.sh
 
-# Directory paths
-FRONTEND_DIR="/home/ubuntu/pilo-frontend"
-BACKEND_DIR="/home/ubuntu/pilo-backend"
-NGINX_SITES="/etc/nginx/sites-available"
+echo "Starting backend deployment..."
 
-echo "Starting deployment process..."
-# Start backend with PM2
-echo "Starting backend server..."
-cd $BACKEND_DIR
-npm install
-pm2 delete all || true
-pm2 start index.js --name pilo-backend
+# Install required packages if not present
+if ! command -v certbot &> /dev/null; then
+    echo "Installing certbot..."
+    sudo apt update
+    sudo apt install -y certbot python3-certbot-nginx
+fi
+
+if ! command -v nginx &> /dev/null; then
+    echo "Installing nginx..."
+    sudo apt install -y nginx
+fi
+
+if ! command -v pm2 &> /dev/null; then
+    echo "Installing PM2..."
+    sudo npm install -g pm2
+fi
+
+# Stop nginx temporarily
+sudo systemctl stop nginx
+
+# Get SSL certificate if not already present
+if [ ! -f /etc/letsencrypt/live/api.pilo.life/fullchain.pem ]; then
+    echo "Obtaining SSL certificate..."
+    sudo certbot certonly --standalone -d api.pilo.life
+fi
 
 # Create Nginx configuration
-echo "Configuring Nginx..."
-sudo tee $NGINX_SITES/pilo.conf > /dev/null <<EOF
+echo "Creating Nginx configuration..."
+sudo tee /etc/nginx/nginx.conf > /dev/null << 'EOL'
 events {
     worker_connections 768;
 }
@@ -25,64 +40,18 @@ http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
-    # Optimization
+    # Basic Settings
     sendfile on;
     tcp_nopush on;
     tcp_nodelay on;
     keepalive_timeout 65;
     types_hash_max_size 2048;
 
-    # Gzip Settings
-    gzip on;
-    gzip_vary on;
-    gzip_proxied any;
-    gzip_comp_level 6;
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
-
-    # Frontend server
-    server {
-        listen 80;
-        server_name www.pilo.life;
-        return 301 https://\$server_name\$request_uri;
-    }
-
-    server {
-        listen 443 ssl;
-        server_name www.pilo.life;
-
-        # SSL Configuration
-        ssl_certificate /etc/letsencrypt/live/www.pilo.life/fullchain.pem;
-        ssl_certificate_key /etc/letsencrypt/live/www.pilo.life/privkey.pem;
-        ssl_protocols TLSv1.2 TLSv1.3;
-        ssl_prefer_server_ciphers on;
-
-        # Security headers
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-        add_header X-Frame-Options "SAMEORIGIN";
-        add_header X-Content-Type-Options "nosniff";
-        add_header X-XSS-Protection "1; mode=block";
-
-        root $FRONTEND_DIR/dist;
-        index index.html;
-
-        # Static file caching
-        location /assets {
-            expires 1y;
-            add_header Cache-Control "public, no-transform";
-        }
-
-        # Handle React routing
-        location / {
-            try_files \$uri \$uri/ /index.html;
-            add_header Cache-Control "no-cache";
-        }
-    }
-
-    # API server
+    # API Server Configuration
     server {
         listen 80;
         server_name api.pilo.life;
-        return 301 https://\$server_name\$request_uri;
+        return 301 https://$server_name$request_uri;
     }
 
     server {
@@ -92,37 +61,135 @@ http {
         # SSL Configuration
         ssl_certificate /etc/letsencrypt/live/api.pilo.life/fullchain.pem;
         ssl_certificate_key /etc/letsencrypt/live/api.pilo.life/privkey.pem;
+
+        # Security Settings
         ssl_protocols TLSv1.2 TLSv1.3;
         ssl_prefer_server_ciphers on;
 
-        # Security headers
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-        add_header X-Frame-Options "DENY";
-        add_header X-Content-Type-Options "nosniff";
-        add_header X-XSS-Protection "1; mode=block";
-
+        # Proxy Settings
         location / {
             proxy_pass http://localhost:3000;
             proxy_http_version 1.1;
-            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection 'upgrade';
-            proxy_set_header Host \$host;
-            proxy_cache_bypass \$http_upgrade;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_set_header Host $host;
+            proxy_cache_bypass $http_upgrade;
 
-            # CORS headers
+            # Headers
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            # CORS
             add_header 'Access-Control-Allow-Origin' '*' always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;
             add_header 'Access-Control-Allow-Headers' 'Origin, X-Requested-With, Content-Type, Accept, Authorization' always;
+
+            # Handle preflight requests
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE';
+                add_header 'Access-Control-Allow-Headers' 'Origin, X-Requested-With, Content-Type, Accept, Authorization';
+                add_header 'Content-Type' 'text/plain charset=UTF-8';
+                add_header 'Content-Length' 0;
+                return 204;
+            }
         }
     }
 }
-EOF
+EOL
 
-# Enable the site and restart Nginx
-sudo ln -sf $NGINX_SITES/pilo.conf /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl restart nginx
+# Test Nginx configuration
+echo "Testing Nginx configuration..."
+sudo nginx -t
+
+if [ $? -eq 0 ]; then
+    echo "Nginx configuration is valid"
+    sudo systemctl restart nginx
+else
+    echo "Nginx configuration is invalid"
+    exit 1
+fi
+
+# Set up SSL auto-renewal
+echo "Setting up SSL auto-renewal..."
+sudo tee /etc/cron.monthly/ssl-renewal > /dev/null << 'EOL'
+#!/bin/bash
+certbot renew --pre-hook "systemctl stop nginx" --post-hook "systemctl start nginx"
+EOL
+
+sudo chmod +x /etc/cron.monthly/ssl-renewal
+
+# Start backend with PM2
+echo "Starting backend server..."
+cd /home/ubuntu/pilo-backend  # Adjust this path to your backend directory
+pm2 delete all || true
+pm2 start index.js --name pilo-backend
+
+# Save PM2 configuration
+pm2 save
+
+# Setup PM2 startup script
+pm2 startup
+
+echo "Setting up log rotation..."
+sudo tee /etc/logrotate.d/nginx > /dev/null << 'EOL'
+/var/log/nginx/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    create 0640 www-data adm
+    sharedscripts
+    prerotate
+        if [ -d /etc/logrotate.d/httpd-prerotate ]; then \
+            run-parts /etc/logrotate.d/httpd-prerotate; \
+        fi \
+    endscript
+    postrotate
+        invoke-rc.d nginx rotate >/dev/null 2>&1
+    endscript
+}
+EOL
+
+# Final checks
+echo "Performing final checks..."
+
+# Check if Nginx is running
+if systemctl is-active --quiet nginx; then
+    echo "✅ Nginx is running"
+else
+    echo "❌ Nginx failed to start"
+fi
+
+# Check if PM2 process is running
+if pm2 pid pilo-backend > /dev/null; then
+    echo "✅ Backend server is running"
+else
+    echo "❌ Backend server failed to start"
+fi
+
+# Test SSL certificate
+echo "Testing SSL certificate..."
+if curl -s -k https://api.pilo.life > /dev/null; then
+    echo "✅ SSL certificate is working"
+else
+    echo "❌ SSL certificate test failed"
+fi
 
 echo "Deployment complete!"
+echo "You can monitor logs with:"
+echo "- Backend logs: pm2 logs"
+echo "- Nginx access logs: sudo tail -f /var/log/nginx/access.log"
+echo "- Nginx error logs: sudo tail -f /var/log/nginx/error.log"
+
+# Show services status
+echo -e "\nService Status:"
+pm2 status
+sudo systemctl status nginx --no-pager
+
+# Test the endpoint
+echo -e "\nTesting API endpoint..."
+curl -k -I https://api.pilo.life
