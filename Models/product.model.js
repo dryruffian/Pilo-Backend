@@ -44,7 +44,7 @@ const ProductSchema = new Schema({
     },
     nutriscore_grade: {
         type: String,
-        enum: ['a', 'b', 'c', 'd', 'e', null]
+        enum: ['a', 'b', 'c', 'd', 'e', 'unknown',null]
     },
     nova_group: {
         type: Number,
